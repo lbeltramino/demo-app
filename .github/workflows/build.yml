@@ -8,6 +8,7 @@ on:
 env:
   IDP_HOST: ${{ vars.IDP_HOST }}
   REGISTRY: ghcr.io
+  CR_SPEC_SLUG: k8s-deployment
 
 jobs:
   build:
@@ -50,28 +51,35 @@ jobs:
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
 
+      - name: Resolve spec ID
+        id: spec
+        run: |
+          SPEC_ID=$(curl -sf "$IDP_HOST/api/v1/specs/compute-resources" \
+            -H "Authorization: API-Key ${{ secrets.IDP_API_KEY }}" \
+            | jq -r --arg slug "$CR_SPEC_SLUG" '.data[] | select(.slug == $slug) | .id')
+          echo "spec_id=$SPEC_ID" >> "$GITHUB_OUTPUT"
+          echo "Spec ID for $CR_SPEC_SLUG: $SPEC_ID"
+
       - name: Build and register all k8s-deployment targets
         run: |
           BUILD_ID="${{ steps.idp-build.outputs.build_id }}"
+          SPEC_ID="${{ steps.spec.outputs.spec_id }}"
           REPO="${{ github.event.repository.name }}"
           OWNER="${{ github.repository_owner }}"
 
           for dir in k8s-deployment/*/; do
             subdir=$(basename "$dir")
             dockerfile="$dir/app/Dockerfile"
-            idp_json="$dir/idp.json"
 
-            if [ ! -f "$dockerfile" ] || [ ! -f "$idp_json" ]; then
-              echo "==> Skipping $subdir (missing app/Dockerfile or idp.json)"
+            if [ ! -f "$dockerfile" ]; then
+              echo "==> Skipping $subdir (missing app/Dockerfile)"
               continue
             fi
 
-            ARTIFACT_NAME=$(jq -r '.artifactName' "$idp_json")
-            SPEC_ID=$(jq -r '.specId' "$idp_json")
             IMAGE="ghcr.io/${OWNER}/${REPO}-${subdir}"
             TAG="$BUILD_ID"
 
-            echo "==> Building $subdir → $IMAGE:$TAG (artifact: $ARTIFACT_NAME)"
+            echo "==> Building $subdir → $IMAGE:$TAG"
 
             docker buildx build \
               --platform linux/amd64,linux/arm64 \
@@ -80,11 +88,11 @@ jobs:
               --push \
               "$dir/app"
 
-            echo "==> Registering artifact $ARTIFACT_NAME for $subdir"
+            echo "==> Registering artifact $subdir"
             curl -sf -X POST "$IDP_HOST/api/v1/applications/${REPO}/builds/${BUILD_ID}/artifacts" \
               -H "Authorization: API-Key ${{ secrets.IDP_API_KEY }}" \
               -H "Content-Type: application/json" \
-              -d "{\"name\":\"$ARTIFACT_NAME\",\"type\":\"docker-image\",\"specId\":\"$SPEC_ID\",\"metadata\":{\"image\":\"$IMAGE\",\"tag\":\"$TAG\"}}"
+              -d "{\"name\":\"$subdir\",\"type\":\"docker-image\",\"specId\":\"$SPEC_ID\",\"metadata\":{\"image\":\"$IMAGE\",\"tag\":\"$TAG\"}}"
 
             echo "==> Done: $subdir"
           done
