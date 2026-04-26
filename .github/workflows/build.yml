@@ -1,0 +1,86 @@
+name: Build
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+env:
+  IDP_HOST: ${{ vars.IDP_HOST }}
+  K8S_SPEC_ID: ${{ vars.K8S_SPEC_ID }}
+  REGISTRY: ghcr.io
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      packages: write
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Create IDP build
+        id: idp-build
+        run: |
+          RESPONSE=$(curl -sf -X POST "$IDP_HOST/api/v1/applications/${{ github.event.repository.name }}/builds" \
+            -H "Authorization: API-Key ${{ secrets.IDP_API_KEY }}" \
+            -H "Content-Type: application/json" \
+            -d "{\"metadata\":{\"ref\":\"$GITHUB_REF\",\"sha\":\"$GITHUB_SHA\",\"run_id\":\"$GITHUB_RUN_ID\"}}")
+          BUILD_ID=$(echo "$RESPONSE" | jq -r '.id')
+          echo "build_id=$BUILD_ID" >> "$GITHUB_OUTPUT"
+          echo "Build ID: $BUILD_ID"
+
+      - name: Mark build as running
+        run: |
+          curl -sf -X PATCH "$IDP_HOST/api/v1/applications/${{ github.event.repository.name }}/builds/${{ steps.idp-build.outputs.build_id }}" \
+            -H "Authorization: API-Key ${{ secrets.IDP_API_KEY }}" \
+            -H "Content-Type: application/json" \
+            -d '{"status":"running"}'
+
+      - name: Log in to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Set up QEMU
+        uses: docker/setup-qemu-action@v3
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Build and push Docker image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: k8s-deployment/app/Dockerfile
+          platforms: linux/amd64,linux/arm64
+          push: true
+          tags: ghcr.io/${{ github.repository_owner }}/${{ github.event.repository.name }}:${{ steps.idp-build.outputs.build_id }}
+
+      - name: Register docker-image artifact
+        run: |
+          IMAGE="ghcr.io/${{ github.repository_owner }}/${{ github.event.repository.name }}"
+          TAG="${{ steps.idp-build.outputs.build_id }}"
+          curl -sf -X POST "$IDP_HOST/api/v1/applications/${{ github.event.repository.name }}/builds/${{ steps.idp-build.outputs.build_id }}/artifacts" \
+            -H "Authorization: API-Key ${{ secrets.IDP_API_KEY }}" \
+            -H "Content-Type: application/json" \
+            -d "{\"name\":\"app-k8s\",\"type\":\"docker-image\",\"specId\":\"$K8S_SPEC_ID\",\"metadata\":{\"image\":\"$IMAGE\",\"tag\":\"$TAG\"}}"
+
+      - name: Finalize build — success
+        if: success()
+        run: |
+          curl -sf -X PATCH "$IDP_HOST/api/v1/applications/${{ github.event.repository.name }}/builds/${{ steps.idp-build.outputs.build_id }}" \
+            -H "Authorization: API-Key ${{ secrets.IDP_API_KEY }}" \
+            -H "Content-Type: application/json" \
+            -d '{"status":"succeeded"}'
+
+      - name: Finalize build — failure
+        if: failure()
+        run: |
+          curl -sf -X PATCH "$IDP_HOST/api/v1/applications/${{ github.event.repository.name }}/builds/${{ steps.idp-build.outputs.build_id }}" \
+            -H "Authorization: API-Key ${{ secrets.IDP_API_KEY }}" \
+            -H "Content-Type: application/json" \
+            -d '{"status":"failed"}'
