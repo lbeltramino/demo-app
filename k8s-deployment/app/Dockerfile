@@ -3,5 +3,5 @@ WORKDIR /app
 COPY package.json .
 COPY src/ ./src/
 COPY public/ ./public/
-EXPOSE 8080
+EXPOSE 80
 CMD ["node", "src/index.js"]

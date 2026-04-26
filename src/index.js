@@ -2,7 +2,7 @@ const http = require('http');
 const fs = require('fs');
 const path = require('path');
 
-const PORT = process.env.PORT || 8080;
+const PORT = process.env.PORT || 80;
 
 // Collect IDP-injected env vars (those set from parameter values)
 const injectedEnv = Object.entries(process.env)
