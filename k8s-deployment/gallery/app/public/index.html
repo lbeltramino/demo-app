@@ -1,0 +1,150 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Photo Gallery</title>
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+    body { font-family: system-ui, sans-serif; background: #f0f0f0; color: #222; min-height: 100vh; }
+    header {
+      background: #111; color: #fff; padding: 16px 24px;
+      display: flex; align-items: center; justify-content: space-between;
+    }
+    header h1 { font-size: 1.3rem; font-weight: 600; }
+    .upload-btn {
+      background: #3b82f6; color: #fff; border: none; border-radius: 6px;
+      padding: 8px 16px; cursor: pointer; font-size: 0.9rem; font-weight: 500;
+    }
+    .upload-btn:hover { background: #2563eb; }
+    .upload-btn:disabled { background: #6b7280; cursor: not-allowed; }
+    #drop-zone {
+      margin: 24px auto; max-width: 900px; border: 2px dashed #9ca3af;
+      border-radius: 12px; padding: 32px; text-align: center; color: #6b7280;
+      background: #fff; transition: border-color 0.2s;
+      display: none;
+    }
+    #drop-zone.active { border-color: #3b82f6; background: #eff6ff; }
+    #drop-zone.visible { display: block; }
+    .gallery {
+      max-width: 900px; margin: 16px auto; padding: 0 16px;
+      display: grid; grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+      gap: 16px;
+    }
+    .photo-card {
+      background: #fff; border-radius: 10px; overflow: hidden;
+      box-shadow: 0 1px 4px rgba(0,0,0,0.1); position: relative;
+    }
+    .photo-card img {
+      width: 100%; height: 180px; object-fit: cover; display: block;
+    }
+    .photo-card .meta {
+      padding: 8px 10px; font-size: 0.75rem; color: #6b7280;
+      white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+    }
+    .delete-btn {
+      position: absolute; top: 6px; right: 6px;
+      background: rgba(0,0,0,0.55); color: #fff; border: none;
+      border-radius: 50%; width: 26px; height: 26px; cursor: pointer;
+      font-size: 14px; line-height: 26px; text-align: center;
+      opacity: 0; transition: opacity 0.15s;
+    }
+    .photo-card:hover .delete-btn { opacity: 1; }
+    .delete-btn:hover { background: #ef4444; }
+    .empty { text-align: center; color: #9ca3af; padding: 60px 0; font-size: 1rem; display: none; }
+    .status { text-align: center; color: #6b7280; padding: 40px; }
+    #progress {
+      max-width: 900px; margin: 0 auto 8px; padding: 0 16px;
+      font-size: 0.85rem; color: #3b82f6; display: none;
+    }
+    #file-input { display: none; }
+  </style>
+</head>
+<body>
+  <header>
+    <h1>Photo Gallery</h1>
+    <div>
+      <button class="upload-btn" onclick="document.getElementById('file-input').click()">+ Upload Photos</button>
+      <input type="file" id="file-input" accept="image/*" multiple onchange="uploadFiles(this.files)">
+    </div>
+  </header>
+
+  <div id="drop-zone">
+    <p>Drop photos here to upload</p>
+    <p style="font-size:0.8rem;margin-top:8px">or click "Upload Photos" above</p>
+  </div>
+
+  <div id="progress"></div>
+  <div class="gallery" id="gallery"><p class="status">Loading...</p></div>
+  <div class="empty" id="empty">No photos yet. Upload some!</div>
+
+  <script>
+    async function loadPhotos() {
+      try {
+        const res = await fetch('/api/photos');
+        const photos = await res.json();
+        const gallery = document.getElementById('gallery');
+        const empty = document.getElementById('empty');
+        if (!photos.length) {
+          gallery.innerHTML = '';
+          empty.style.display = 'block';
+          return;
+        }
+        empty.style.display = 'none';
+        gallery.innerHTML = photos.map(p => `
+          <div class="photo-card" data-key="${escHtml(p.key)}">
+            <img src="${escHtml(p.url)}" alt="${escHtml(p.key)}" loading="lazy">
+            <div class="meta">${escHtml(p.key.replace(/^\d+-/, ''))}</div>
+            <button class="delete-btn" onclick="deletePhoto('${escHtml(p.key)}')" title="Delete">✕</button>
+          </div>`).join('');
+      } catch (e) {
+        document.getElementById('gallery').innerHTML = `<p class="status">Error: ${e.message}</p>`;
+      }
+    }
+
+    async function uploadFiles(files) {
+      if (!files.length) return;
+      const prog = document.getElementById('progress');
+      prog.style.display = 'block';
+      let done = 0;
+      for (const file of files) {
+        prog.textContent = `Uploading ${file.name} (${done + 1}/${files.length})...`;
+        const fd = new FormData();
+        fd.append('file', file);
+        try {
+          const res = await fetch('/api/photos', { method: 'POST', body: fd });
+          if (!res.ok) { const e = await res.json(); alert(`Failed: ${e.error}`); }
+        } catch (e) { alert(`Upload error: ${e.message}`); }
+        done++;
+      }
+      prog.style.display = 'none';
+      document.getElementById('file-input').value = '';
+      loadPhotos();
+    }
+
+    async function deletePhoto(key) {
+      if (!confirm(`Delete "${key.replace(/^\d+-/, '')}"?`)) return;
+      try {
+        await fetch(`/api/photos/${encodeURIComponent(key)}`, { method: 'DELETE' });
+        loadPhotos();
+      } catch (e) { alert(`Delete error: ${e.message}`); }
+    }
+
+    function escHtml(str) {
+      return str.replace(/[&<>"']/g, m => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[m]));
+    }
+
+    // Drag and drop
+    const dz = document.getElementById('drop-zone');
+    document.addEventListener('dragover', e => { e.preventDefault(); dz.classList.add('visible','active'); });
+    document.addEventListener('dragleave', e => { if (!e.relatedTarget) dz.classList.remove('visible','active'); });
+    document.addEventListener('drop', e => {
+      e.preventDefault();
+      dz.classList.remove('visible','active');
+      uploadFiles(e.dataTransfer.files);
+    });
+
+    loadPhotos();
+  </script>
+</body>
+</html>

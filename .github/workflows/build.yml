@@ -7,7 +7,6 @@ on:
 
 env:
   IDP_HOST: ${{ vars.IDP_HOST }}
-  K8S_SPEC_ID: ${{ vars.K8S_SPEC_ID }}
   REGISTRY: ghcr.io
 
 jobs:
@@ -51,23 +50,44 @@ jobs:
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
 
-      - name: Build and push Docker image
-        uses: docker/build-push-action@v6
-        with:
-          context: .
-          file: k8s-deployment/app/Dockerfile
-          platforms: linux/amd64,linux/arm64
-          push: true
-          tags: ghcr.io/${{ github.repository_owner }}/${{ github.event.repository.name }}:${{ steps.idp-build.outputs.build_id }}
-
-      - name: Register docker-image artifact
+      - name: Build and register all k8s-deployment targets
         run: |
-          IMAGE="ghcr.io/${{ github.repository_owner }}/${{ github.event.repository.name }}"
-          TAG="${{ steps.idp-build.outputs.build_id }}"
-          curl -sf -X POST "$IDP_HOST/api/v1/applications/${{ github.event.repository.name }}/builds/${{ steps.idp-build.outputs.build_id }}/artifacts" \
-            -H "Authorization: API-Key ${{ secrets.IDP_API_KEY }}" \
-            -H "Content-Type: application/json" \
-            -d "{\"name\":\"app-k8s\",\"type\":\"docker-image\",\"specId\":\"$K8S_SPEC_ID\",\"metadata\":{\"image\":\"$IMAGE\",\"tag\":\"$TAG\"}}"
+          BUILD_ID="${{ steps.idp-build.outputs.build_id }}"
+          REPO="${{ github.event.repository.name }}"
+          OWNER="${{ github.repository_owner }}"
+
+          for dir in k8s-deployment/*/; do
+            subdir=$(basename "$dir")
+            dockerfile="$dir/app/Dockerfile"
+            idp_json="$dir/idp.json"
+
+            if [ ! -f "$dockerfile" ] || [ ! -f "$idp_json" ]; then
+              echo "==> Skipping $subdir (missing app/Dockerfile or idp.json)"
+              continue
+            fi
+
+            ARTIFACT_NAME=$(jq -r '.artifactName' "$idp_json")
+            SPEC_ID=$(jq -r '.specId' "$idp_json")
+            IMAGE="ghcr.io/${OWNER}/${REPO}-${subdir}"
+            TAG="$BUILD_ID"
+
+            echo "==> Building $subdir → $IMAGE:$TAG (artifact: $ARTIFACT_NAME)"
+
+            docker buildx build \
+              --platform linux/amd64,linux/arm64 \
+              --file "$dockerfile" \
+              --context "$dir/app" \
+              --tag "$IMAGE:$TAG" \
+              --push
+
+            echo "==> Registering artifact $ARTIFACT_NAME for $subdir"
+            curl -sf -X POST "$IDP_HOST/api/v1/applications/${REPO}/builds/${BUILD_ID}/artifacts" \
+              -H "Authorization: API-Key ${{ secrets.IDP_API_KEY }}" \
+              -H "Content-Type: application/json" \
+              -d "{\"name\":\"$ARTIFACT_NAME\",\"type\":\"docker-image\",\"specId\":\"$SPEC_ID\",\"metadata\":{\"image\":\"$IMAGE\",\"tag\":\"$TAG\"}}"
+
+            echo "==> Done: $subdir"
+          done
 
       - name: Finalize build — success
         if: success()
