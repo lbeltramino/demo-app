@@ -73,12 +73,20 @@ app.get('/api/photos', async (_req, res) => {
 app.post('/api/photos', (req, res) => {
   const bb = busboy({ headers: req.headers, limits: { fileSize: 20 * 1024 * 1024 } });
   let uploaded = false;
+  let responseSent = false;
+
+  const sendResponse = (status, data) => {
+    if (responseSent) return;
+    responseSent = true;
+    if (status >= 400) res.status(status).json(data);
+    else res.json(data);
+  };
 
   bb.on('file', (fieldname, stream, info) => {
     const { filename, mimeType } = info;
     if (!/^image\//i.test(mimeType)) {
       stream.resume();
-      return res.status(400).json({ error: 'Only image files are allowed' });
+      return sendResponse(400, { error: 'Only image files are allowed' });
     }
     const key = `${Date.now()}-${filename.replace(/[^a-zA-Z0-9._-]/g, '_')}`;
     const chunks = [];
@@ -93,16 +101,18 @@ app.post('/api/photos', (req, res) => {
           ContentType: mimeType,
         }));
         uploaded = true;
-        res.json({ key, message: 'Uploaded successfully' });
+        sendResponse(200, { key, message: 'Uploaded successfully' });
       } catch (err) {
         console.error('Upload error:', err.message);
-        res.status(500).json({ error: err.message });
+        sendResponse(500, { error: err.message });
       }
     });
   });
 
-  bb.on('finish', () => { if (!uploaded) res.status(400).json({ error: 'No file received' }); });
-  bb.on('error', err => res.status(500).json({ error: err.message }));
+  bb.on('error', err => {
+    console.error('Busboy error:', err.message);
+    sendResponse(500, { error: err.message });
+  });
   req.pipe(bb);
 });
 
