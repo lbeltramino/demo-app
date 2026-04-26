@@ -9,40 +9,26 @@ TEMPLATE = r"""<!DOCTYPE html>
   <link href="https://fonts.googleapis.com/css2?family=Fraunces:ital,opsz,wght@0,9..144,400;0,9..144,700;1,9..144,400&family=Outfit:wght@300;400;600;700&display=swap" rel="stylesheet" />
   <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
   <style>
-:root {
-  --bg0: #0f1419;
-  --bg1: #1a222d;
-  --paper: #f3ead8;
-  --ink: #1a1510;
-  --muted: #5c5348;
-  --accent: #c45c3e;
-  --accent2: #2d6a8f;
-  --line: rgba(26,21,16,.12);
-  --glow: rgba(196,92,62,.25);
-  --radius: 14px;
-  --font-display: "Fraunces", Georgia, serif;
-  --font-body: "Outfit", system-ui, sans-serif;
-}
-* { box-sizing: border-box; }
-html { scroll-behavior: smooth; }
-body {
-  margin: 0;
-  font-family: var(--font-body);
-  background: var(--bg0);
-  color: var(--paper);
-  min-height: 100vh;
-  line-height: 1.5;
-}
-body::before {
-  content: "";
-  position: fixed; inset: 0;
-  background:
-    radial-gradient(ellipse 80% 50% at 10% -10%, rgba(45,106,143,.35), transparent 50%),
-    radial-gradient(ellipse 60% 40% at 100% 0%, rgba(196,92,62,.2), transparent 45%),
-    url("data:image/svg+xml,%3Csvg viewBox='0 0 256 256' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='4' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)' opacity='0.04'/%3E%3C/svg%3E");
-  pointer-events: none; z-index: 0;
-}
-.wrap { position: relative; z-index: 1; max-width: 1320px; margin: 0 auto; padding: 2rem 1.25rem 4rem; }
+    :root {
+      --bg0: #0f1419;
+      --bg1: #1a222d;
+      --paper: #f3ead8;
+      --accent: #c45c3e;
+      --accent2: #2d6a8f;
+    }
+    html, body { margin: 0; font-family: 'Outfit', system-ui, sans-serif; background: var(--bg0); color: var(--paper); }
+    .nav { position: fixed; top: 0; left: 0; right: 0; height: 60px; background: var(--bg1); border-bottom: 1px solid rgba(243,234,216,.08); display: flex; align-items: center; padding: 0 1.5rem; z-index: 100; }
+    .nav h1 { font-family: 'Fraunces', serif; font-size: 1.25rem; margin: 0; }
+    .nav a { color: var(--paper); text-decoration: none; }
+    .hamburger { margin-left: auto; cursor: pointer; padding: 0.5rem; display: flex; flex-direction: column; gap: 5px; }
+    .hamburger span { width: 24px; height: 2px; background: var(--paper); }
+    .menu { display: none; position: fixed; top: 60px; right: 0; bottom: 0; width: 300px; background: var(--bg1); border-left: 1px solid rgba(243,234,216,.1); padding: 1rem; overflow-y: auto; z-index: 99; }
+    .menu.open { display: block; }
+    .menu h2 { font-size: 0.7rem; text-transform: uppercase; letter-spacing: 0.1em; color: rgba(243,234,216,.5); margin: 0 0 0.75rem; }
+    .report-item { padding: 0.5rem 0.75rem; background: var(--bg0); border-radius: 6px; margin-bottom: 0.4rem; cursor: pointer; font-size: 0.85rem; }
+    .report-item:hover { background: rgba(196,92,62,.2); }
+    .report-item.active { border: 1px solid var(--accent); }
+    .main { padding: 80px 1.5rem 2rem; }
 
 header.hero {
   padding: 2.5rem 0 2rem;
@@ -545,6 +531,17 @@ footer {
   </style>
 </head>
 <body>
+  <nav class="nav">
+    <h1><a href="/">Atlas · Rosario</a></h1>
+    <div class="hamburger" onclick="document.querySelector('.menu').classList.toggle('open')">
+      <span></span><span></span><span></span>
+    </div>
+  </nav>
+  <div class="menu" id="reportMenu">
+    <h2>Reportes</h2>
+    <div id="reportList"></div>
+    <p style="margin-top:1rem"><a href="/" style="color:var(--accent2)">← Subir nuevo reporte</a></p>
+  </div>
   <div class="wrap">
     <header class="hero">
       <h1>Atlas inmobiliario · Rosario</h1>
@@ -649,6 +646,20 @@ footer {
 
   <script>
 const RAW = __DATA_JSON__;
+</script>
+<script>
+fetch('/api/reports').then(r=>r.json()).then(reports=>{
+  const list = document.getElementById('reportList');
+  if(list) list.innerHTML = reports.map(r=>{
+    const m=r.meta||{}, a=m.analytics||{}, g=a.global||{};
+    return '<div class="report-item'+(r.id===window.__CURRENT_REPORT__?' active':'')+'" onclick="window.location.href=\'/?report='+r.id+'\'">'+(m.ciudad||'Reporte')+' · '+(g.n||'—')+' avisos</div>';
+  }).join('')||'<p style="color:rgba(243,234,216,.5);font-size:0.8rem">No hay reportes</p>';
+});
+</script>
+  <script>
+const RAW = __DATA_JSON__;
+const REPORT_ID = window.location.search.match(/report=([a-f0-9]+)/);
+window.__CURRENT_REPORT__ = REPORT_ID ? REPORT_ID[1] : null;
   </script>
   <script>
 (function () {
