@@ -76,9 +76,9 @@ jobs:
             docker buildx build \
               --platform linux/amd64,linux/arm64 \
               --file "$dockerfile" \
-              --context "$dir/app" \
               --tag "$IMAGE:$TAG" \
-              --push
+              --push \
+              "$dir/app"
 
             echo "==> Registering artifact $ARTIFACT_NAME for $subdir"
             curl -sf -X POST "$IDP_HOST/api/v1/applications/${REPO}/builds/${BUILD_ID}/artifacts" \
