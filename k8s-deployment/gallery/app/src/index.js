@@ -55,17 +55,36 @@ app.get('/api/photos', async (_req, res) => {
       objects
         .filter(o => /\.(jpg|jpeg|png|gif|webp)$/i.test(o.Key))
         .sort((a, b) => b.LastModified - a.LastModified)
-        .map(async o => ({
+        .map(o => ({
           key: o.Key,
           size: o.Size,
           lastModified: o.LastModified,
-          url: await getSignedUrl(s3, new GetObjectCommand({ Bucket: BUCKET, Key: o.Key }), { expiresIn: 3600 }),
         }))
     );
     res.json(photos);
   } catch (err) {
     console.error('List error:', err.message);
     res.status(500).json({ error: err.message });
+  }
+});
+
+// ── Proxy photo ─────────────────────────────────────────────────────────────
+app.get('/api/photos/:key(*)', async (req, res) => {
+  try {
+    const { Body, ContentType } = await s3.send(new GetObjectCommand({
+      Bucket: BUCKET,
+      Key: req.params.key,
+    }));
+    res.set('Content-Type', ContentType || 'image/jpeg');
+    res.set('Cache-Control', 'public, max-age=3600');
+    if (Body instanceof Uint8Array) {
+      res.send(Buffer.from(Body));
+    } else {
+      Body.pipe(res);
+    }
+  } catch (err) {
+    console.error('Get error:', err.message);
+    res.status(404).send('Not found');
   }
 });
 

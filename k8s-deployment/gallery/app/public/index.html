@@ -93,7 +93,7 @@
         empty.style.display = 'none';
         gallery.innerHTML = photos.map(p => `
           <div class="photo-card" data-key="${escHtml(p.key)}">
-            <img src="${escHtml(p.url)}" alt="${escHtml(p.key)}" loading="lazy">
+            <img src="/api/photos/${escHtml(encodeURIComponent(p.key))}" alt="${escHtml(p.key)}" loading="lazy">
             <div class="meta">${escHtml(p.key.replace(/^\d+-/, ''))}</div>
             <button class="delete-btn" onclick="deletePhoto('${escHtml(p.key)}')" title="Delete">✕</button>
           </div>`).join('');
