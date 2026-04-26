@@ -13,4 +13,4 @@ ENV API_URL=https://api.sosiva451.com/Avisos \
 
 EXPOSE 8080
 
-CMD ["python", "server.py"]
+CMD ["python", "-u", "server.py"]
