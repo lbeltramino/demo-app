@@ -1,0 +1,254 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>MinIO Browser</title>
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+    body { font-family: system-ui, sans-serif; background: #f5f5f5; color: #222; min-height: 100vh; }
+
+    header {
+      background: #111; color: #fff; padding: 14px 24px;
+      display: flex; align-items: center; gap: 12px;
+    }
+    header h1 { font-size: 1.2rem; font-weight: 600; flex: 1; }
+
+    .tabs {
+      display: flex; gap: 4px; background: #1f2937; padding: 0 24px;
+      border-bottom: 2px solid #374151; overflow-x: auto;
+    }
+    .tab {
+      padding: 10px 18px; cursor: pointer; color: #9ca3af;
+      font-size: 0.875rem; font-weight: 500; border-bottom: 2px solid transparent;
+      margin-bottom: -2px; white-space: nowrap; transition: color 0.15s;
+    }
+    .tab:hover { color: #e5e7eb; }
+    .tab.active { color: #fff; border-bottom-color: #3b82f6; }
+
+    .toolbar {
+      max-width: 960px; margin: 20px auto 0; padding: 0 20px;
+      display: flex; align-items: center; gap: 10px;
+    }
+    .toolbar h2 { flex: 1; font-size: 0.95rem; color: #6b7280; }
+
+    .btn {
+      padding: 7px 14px; border: none; border-radius: 6px; cursor: pointer;
+      font-size: 0.85rem; font-weight: 500; transition: background 0.15s;
+    }
+    .btn-primary { background: #3b82f6; color: #fff; }
+    .btn-primary:hover { background: #2563eb; }
+    .btn-primary:disabled { background: #6b7280; cursor: not-allowed; }
+
+    .drop-zone {
+      max-width: 960px; margin: 12px auto 0; padding: 0 20px;
+      display: none;
+    }
+    .drop-zone.visible { display: block; }
+    .drop-inner {
+      border: 2px dashed #9ca3af; border-radius: 10px; padding: 24px;
+      text-align: center; color: #6b7280; background: #fff;
+      transition: border-color 0.15s, background 0.15s;
+    }
+    .drop-inner.over { border-color: #3b82f6; background: #eff6ff; }
+
+    .progress {
+      max-width: 960px; margin: 8px auto 0; padding: 0 20px;
+      font-size: 0.8rem; color: #3b82f6; display: none;
+    }
+    .progress.visible { display: block; }
+
+    table {
+      max-width: 960px; margin: 12px auto 24px; width: calc(100% - 40px);
+      background: #fff; border-radius: 10px; overflow: hidden;
+      box-shadow: 0 1px 3px rgba(0,0,0,0.08); border-collapse: collapse;
+    }
+    th {
+      text-align: left; padding: 10px 14px; font-size: 0.78rem;
+      text-transform: uppercase; letter-spacing: 0.05em; color: #6b7280;
+      background: #f9fafb; border-bottom: 1px solid #e5e7eb;
+    }
+    td { padding: 10px 14px; font-size: 0.875rem; border-bottom: 1px solid #f3f4f6; }
+    tr:last-child td { border-bottom: none; }
+    tr:hover td { background: #f9fafb; }
+    .key-cell { font-family: monospace; font-size: 0.8rem; max-width: 400px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .size-cell { color: #6b7280; white-space: nowrap; }
+    .date-cell { color: #6b7280; white-space: nowrap; font-size: 0.8rem; }
+    .actions { display: flex; gap: 6px; }
+    .action-btn {
+      padding: 4px 10px; border: none; border-radius: 4px; cursor: pointer;
+      font-size: 0.78rem; font-weight: 500;
+    }
+    .action-btn.download { background: #eff6ff; color: #2563eb; }
+    .action-btn.download:hover { background: #dbeafe; }
+    .action-btn.delete { background: #fef2f2; color: #dc2626; }
+    .action-btn.delete:hover { background: #fee2e2; }
+
+    .empty { text-align: center; color: #9ca3af; padding: 60px 20px; font-size: 0.95rem; }
+    .status { text-align: center; color: #9ca3af; padding: 60px 20px; }
+    #file-input { display: none; }
+  </style>
+</head>
+<body>
+  <header>
+    <h1>MinIO Browser</h1>
+  </header>
+
+  <nav class="tabs" id="tabs"></nav>
+
+  <div class="toolbar">
+    <h2 id="bucket-label"></h2>
+    <button class="btn btn-primary" id="upload-btn" onclick="document.getElementById('file-input').click()">+ Upload</button>
+    <input type="file" id="file-input" multiple onchange="uploadFiles(this.files)">
+  </div>
+
+  <div class="drop-zone visible" id="drop-zone">
+    <div class="drop-inner" id="drop-inner">
+      Drop files here to upload, or click <strong>Upload</strong> above
+    </div>
+  </div>
+
+  <div class="progress" id="progress"></div>
+
+  <div id="content"><p class="status">Loading buckets...</p></div>
+
+  <script>
+    let buckets = [];
+    let activeBucket = null;
+
+    function esc(str) {
+      return String(str).replace(/[&<>"']/g, m =>
+        ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[m]));
+    }
+
+    function fmtSize(bytes) {
+      if (bytes < 1024) return `${bytes} B`;
+      if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
+      if (bytes < 1024 * 1024 * 1024) return `${(bytes / 1024 / 1024).toFixed(1)} MB`;
+      return `${(bytes / 1024 / 1024 / 1024).toFixed(2)} GB`;
+    }
+
+    function fmtDate(d) {
+      return new Date(d).toLocaleString();
+    }
+
+    async function loadBuckets() {
+      try {
+        const res = await fetch('/api/buckets');
+        buckets = await res.json();
+        renderTabs();
+        if (buckets.length) selectBucket(buckets[0].slug);
+      } catch (e) {
+        document.getElementById('content').innerHTML = `<p class="status">Error loading buckets: ${esc(e.message)}</p>`;
+      }
+    }
+
+    function renderTabs() {
+      const tabs = document.getElementById('tabs');
+      tabs.innerHTML = buckets.map(b => `
+        <div class="tab${activeBucket === b.slug ? ' active' : ''}" onclick="selectBucket('${esc(b.slug)}')">
+          ${esc(b.bucket)}
+        </div>
+      `).join('');
+    }
+
+    function selectBucket(slug) {
+      activeBucket = slug;
+      renderTabs();
+      const b = buckets.find(x => x.slug === slug);
+      document.getElementById('bucket-label').textContent = b ? `${b.bucket}` : '';
+      loadObjects();
+    }
+
+    async function loadObjects() {
+      if (!activeBucket) return;
+      document.getElementById('content').innerHTML = `<p class="status">Loading...</p>`;
+      try {
+        const res = await fetch(`/api/buckets/${activeBucket}/objects`);
+        const objects = await res.json();
+        if (!objects.length) {
+          document.getElementById('content').innerHTML = `<p class="empty">No objects in this bucket yet.</p>`;
+          return;
+        }
+        document.getElementById('content').innerHTML = `
+          <table>
+            <thead>
+              <tr>
+                <th>Key</th>
+                <th>Size</th>
+                <th>Last Modified</th>
+                <th></th>
+              </tr>
+            </thead>
+            <tbody>
+              ${objects.map(o => `
+                <tr>
+                  <td class="key-cell" title="${esc(o.key)}">${esc(o.key)}</td>
+                  <td class="size-cell">${fmtSize(o.size)}</td>
+                  <td class="date-cell">${fmtDate(o.lastModified)}</td>
+                  <td>
+                    <div class="actions">
+                      <button class="action-btn download" onclick="downloadObject('${esc(o.key)}')">Download</button>
+                      <button class="action-btn delete" onclick="deleteObject('${esc(o.key)}')">Delete</button>
+                    </div>
+                  </td>
+                </tr>
+              `).join('')}
+            </tbody>
+          </table>
+        `;
+      } catch (e) {
+        document.getElementById('content').innerHTML = `<p class="status">Error: ${esc(e.message)}</p>`;
+      }
+    }
+
+    function downloadObject(key) {
+      window.location.href = `/api/buckets/${activeBucket}/objects/${encodeURIComponent(key)}`;
+    }
+
+    async function deleteObject(key) {
+      if (!confirm(`Delete "${key}"?`)) return;
+      try {
+        const res = await fetch(`/api/buckets/${activeBucket}/objects/${encodeURIComponent(key)}`, { method: 'DELETE' });
+        if (!res.ok) { const e = await res.json(); alert(`Failed: ${e.error}`); return; }
+        loadObjects();
+      } catch (e) { alert(`Error: ${e.message}`); }
+    }
+
+    async function uploadFiles(files) {
+      if (!files.length || !activeBucket) return;
+      const prog = document.getElementById('progress');
+      prog.className = 'progress visible';
+      const btn = document.getElementById('upload-btn');
+      btn.disabled = true;
+      let done = 0;
+      for (const file of files) {
+        prog.textContent = `Uploading ${file.name} (${done + 1}/${files.length})...`;
+        const fd = new FormData();
+        fd.append('file', file);
+        try {
+          const res = await fetch(`/api/buckets/${activeBucket}/objects`, { method: 'POST', body: fd });
+          if (!res.ok) { const e = await res.json(); alert(`Failed: ${e.error}`); }
+        } catch (e) { alert(`Upload error: ${e.message}`); }
+        done++;
+      }
+      prog.className = 'progress';
+      btn.disabled = false;
+      document.getElementById('file-input').value = '';
+      loadObjects();
+    }
+
+    // Drag and drop
+    const dropInner = document.getElementById('drop-inner');
+    document.addEventListener('dragover', e => { e.preventDefault(); dropInner.classList.add('over'); });
+    document.addEventListener('dragleave', e => { if (!e.relatedTarget) dropInner.classList.remove('over'); });
+    document.addEventListener('drop', e => {
+      e.preventDefault();
+      dropInner.classList.remove('over');
+      uploadFiles(e.dataTransfer.files);
+    });
+
+    loadBuckets();
+  </script>
+</body>
+</html>
