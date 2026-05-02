@@ -12,7 +12,7 @@ env:
 
 jobs:
   build:
-    runs-on: idp-runner
+    runs-on: app-builder
     permissions:
       contents: write
       packages: write
